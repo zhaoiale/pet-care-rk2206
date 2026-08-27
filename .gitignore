@@ -1,0 +1,12 @@
+# 备份文件
+*.bak
+*~
+
+# 编译产物
+out/
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
