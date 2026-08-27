@@ -1,110 +1,93 @@
-# pet-care-rk2206 · 智宠管家（RK2206 / OpenHarmony 轻量系统）
+# 智宠管家 · pet-care-rk2206（RK2206 + OpenHarmony 全栈智能宠物系统）
 
-基于 **RK2206 + OpenHarmony LiteOS-M** 的智能宠物管家示例工程，运行在小凌派 RK2206 开发板上。
-通过称重、心率/血氧、红外测温、六轴姿态、语音识别、GPS 等多传感器融合，实现**自动投喂、健康监测、语音交互、定位追踪、远程联网**等能力。
+> 2024 全国大学生嵌入式芯片与系统设计竞赛作品 · 基于 OpenHarmony RK2206 的宠物异常行为感知与主动关怀系统
 
-> 本目录是 `txsmartropenharmony`（中软国际 RK2206 OpenHarmony SDK）中
-> `vendor/isoftstone/rk2206/samples/pet_care` 样例的独立备份仓库，
-> 供项目归档与后续（如 HydroMate 智能饮水管家）复用南向驱动代码。
+通过 **称重 / 心率血氧 / 红外测温 / 六轴姿态 / 离线语音 / GPS 定位** 等多传感器融合，实现宠物**异常行为感知、情绪安抚、定量投喂、电子围栏与远程关怀**；配套 HarmonyOS App 提供实时数据看板与远程控制。
+
+本仓库同时包含**硬件固件（南向）**与**软件 App（北向）**两部分完整源码。
 
 ---
 
 ## 功能特性
 
-| 模块 | 功能 | 主要器件 |
-|---|---|---|
-| 自动投喂 | 定时/按键/语音触发投喂，称重感知食量 | 投喂电机/继电器、HX711 称重 |
-| 健康监测 | 心率、血氧、红外体温、活动量统计 | MAX30102、MLX90614、MPU6050 |
-| 语音交互 | 离线语音识别控制（喂食、查询等） | SU-03T 语音模块 |
-| 定位追踪 | 宠物位置获取与围栏告警 | ATGM336H GPS、Geofence |
-| 环境感知 | 光照、温湿度监测 | 光照/温湿度传感器 |
-| 联网上报 | MQTT 连接云端，数据上报 | paho-mqtt |
-| 交互反馈 | LCD 显示、RGB 灯、蜂鸣器 | 0.96" OLED/LCD、RGB、蜂鸣器 |
+| 能力 | 说明 |
+|---|---|
+| 异常行为感知 | 焦虑引擎（Z-score + 马氏距离 + HRV 分析），输出 0-100 焦虑指数与情绪标签 |
+| 主动安抚 | 24h 分桶自适应基线学习，RGB 灯光 / 蜂鸣 / 语音 分级安抚 |
+| 定量投喂 | HX711 称重闭环克数控制 + 每日定时投喂计划 |
+| 电子围栏 | GPS 轨迹记录，100m 半径越界检测，离线轨迹 Flash 存储 |
+| 远程控制 | HiveMQ MQTT 通信，App 远程投喂 / 安抚 / 查看轨迹 |
+| 健康监测 | MAX30102 心率血氧、MLX90614 红外体温、MPU6050 活动量 |
+| 语音交互 | SU-03T 中文离线语音识别 |
+| App 全栈 | HarmonyOS ArkTS，登录/看板/投喂/历史/领养等 16+ 页面 |
 
 ---
 
 ## 目录结构
 
 ```
-pet_care/
-├── BUILD.gn                  # 构建脚本（static_library: pet_care_example）
-├── iot_pet_care_example.c    # 主程序：任务创建 / 消息队列 / 业务编排
-├── include/                  # 全部模块头文件
-│   ├── drv_*.h               # 各传感器/执行器驱动（hx711/max30102/mpu6050/...）
-│   ├── health_monitor.h      # 健康监测逻辑
-│   ├── feed_scheduler.h      # 投喂调度
-│   ├── voice_*.h             # 语音识别与意图解析
-│   ├── smart_home*.h         # 智能家居事件总线
-│   └── ...
-└── src/                      # 全部模块实现
-    ├── drv_*.c               # 驱动实现
-    ├── health_monitor.c
-    ├── feed_scheduler.c
-    ├── voice_*.c
-    ├── smart_home.c / smart_home_event.c
-    └── ...
+pet-care-rk2206/
+├── hardware_src/            # 南向：RK2206 固件源码（OpenHarmony LiteOS-M）
+│   ├── BUILD.gn             # GN 构建配置（static_library: pet_care_example）
+│   ├── iot_pet_care_example.c  # 主程序：任务创建 / 主循环 / MQTT 打包
+│   ├── include/             # 模块头文件（33 个）
+│   ├── src/                 # 模块源码（33 个）：驱动 / 算法 / 业务
+│   └── README.md            # 固件说明（依赖 SDK 集成）
+└── app/                     # 北向：HarmonyOS App 源码（ArkTS/ArkUI）
+    ├── AppScope/            # 应用级配置
+    ├── entry/               # entry 模块（pages / services / database / utils / model）
+    ├── hvigor/              # 构建配置
+    ├── build-profile.json5  # 工程构建配置
+    ├── oh-package.json5     # 依赖声明
+    ├── *.py                 # 辅助脚本（焦虑模拟 / 演示数据）
+    ├── *.md                 # 项目文档（README / demo_script / DEVELOPMENT_LOG）
+    └── README.md            # 详细项目文档（硬件设计 + 固件架构 + App + MQTT 协议）
 ```
 
 ---
 
-## 环境要求
+## 硬件部分（hardware_src/）
 
-- **SDK**：`txsmartropenharmony`（RK2206 OpenHarmony 轻量系统源码），需将本目录放置到
-  `vendor/isoftstone/rk2206/samples/pet_care`
-- **编译工具**：DevEco Studio（设备开发版）/ hb 编译环境，LiteOS-M 内核，产品 `isoftstone-rk2206`
-- **开发板**：小凌派 RK2206（板载 WiFi + 多种外设接口）
+- **主控**：RK2206（Cortex-M4 @ 200MHz）+ OpenHarmony LiteOS-M
+- **传感器**：SHT30 温湿度、BH1750 光照、MAX30102 心率血氧、MPU6050 六轴、ATGM336H GPS、HX711 称重、HC-SR501 人体感应、SU-03T 离线语音
+- **执行器**：2.8" TFT LCD（ILI9341）、WS2812 RGB LED、有源蜂鸣器、投喂电机（继电器隔离）
 
----
-
-## 编译步骤
+固件需集成到 `txsmartropenharmony` SDK 中编译：
 
 ```bash
-# 1. 在 SDK 根目录确认 ohos_config.json 配置（board: rk2206, kernel: liteos_m）
-# 2. 全量构建
+# 将 hardware_src 放置到 SDK 的 vendor/isoftstone/rk2206/samples/pet_care
+# 在 SDK 根目录执行
 python3 build/lite/hb/__main__.py build -f
-# 或
-./pet_build.sh
-# 3. 产物
-#    out/.../liteos.bin  +  Firmware.img → 使用烧录工具烧写
 ```
 
-> 本样例通过 `vendor/isoftstone/rk2206/samples/BUILD.gn` 引用 `pet_care_example` 库，
-> 编译宏在 `iot_pet_care_example.c` 顶部可开关各功能模块。
+> 详细引脚分配、接线图、电源要求与算法参数见 `hardware_src/README.md`。
 
 ---
 
-## 关键配置
+## 软件部分（app/）
 
-WiFi 与功能开关集中在主程序头部：
+HarmonyOS ArkUI（ArkTS）应用，DevEco Studio 直接打开 `app/` 即可编译打包 HAP。
 
-```c
-#define ROUTE_SSID      "MY_SW"          // WiFi 账号（修改为你自己的）
-#define ROUTE_PASSWORD "12345678"        // WiFi 密码
-#define HX711_ENABLED       1            // 称重模块开关
-#define FEEDER_ENABLED      1            // 投喂模块开关
-#define FEEDER_GPIO         GPIO0_PA5    // 投喂继电器 GPIO
-#define AUTO_COMFORT_ENABLED 1           // 智能舒适环境控制
-```
+- **页面**：登录/注册、宠物看板、投喂控制、历史曲线、舒适安抚、虚拟宠物、领养管理等 16+ 页面
+- **服务**：MQTT 通信（`MqttService`）、本地通知、DeepSeek 智能问答
+- **数据**：RelationalStore 本地库（宠物档案 / 投喂计划 / 传感器记录）
 
-MQTT 服务器地址、设备 ID 等在 `src/iot.c` 中配置。
+MQTT 协议：`broker.hivemq.com:1883`，发布 `petcare/device/data`，订阅 `petcare/device/command`。
+
+> 详细功能、页面说明与命令协议见 `app/README.md`。
 
 ---
 
-## 硬件接线（BOM 参考）
+## 编译与烧录
 
-- 主控：小凌派 RK2206
-- 称重：HX711 + 5kg 悬臂梁传感器（SCK/DT 接 GPIO，3.3V 供电）
-- 心率血氧：MAX30102（I2C）
-- 红外测温：MLX90614（I2C）
-- 姿态：MPU6050（I2C）
-- 语音：SU-03T（串口）
-- 定位：ATGM336H（串口）
-- 显示：0.96" SSD1306 OLED / LCD
-- 执行器：投喂电机/继电器、RGB LED、蜂鸣器
+| 部分 | 工具 | 步骤 |
+|---|---|---|
+| 固件 | DevEco Studio（设备开发版）/ hb | 集成到 SDK 后 `hb build`，产物 `liteos.bin` + `Firmware.img` 烧录 |
+| App | DevEco Studio（应用开发版） | 打开 `app/` → Build → Build Hap(s) → 签名安装到 HarmonyOS 手机 |
 
 ---
 
 ## License
 
 工程源码基于 [Apache License 2.0](LICENSE)。
-驱动/样例版权归 iSoftStone Education Co., Ltd.（中软国际）所有，本仓库仅作学习与二次开发归档。
+固件驱动/样例版权归 iSoftStone Education Co., Ltd.（中软国际）所有，本仓库仅作学习与二次开发归档。
