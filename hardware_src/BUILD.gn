@@ -1,0 +1,55 @@
+# Copyright (c)  2024 iSoftStone Education Co., Ltd.
+
+static_library("pet_care_example") {
+  sources = [
+    "iot_pet_care_example.c",
+    "src/activity_monitor.c",
+    "src/adc_key.c",
+    "src/anxiety_engine.c",
+    "src/atgm336h.c",
+    "src/baseline_learner.c",
+    "src/cli.c",
+    "src/components.c",
+    "src/drv_beep.c",
+    "src/drv_body_induction.c",
+    "src/geofence.c",
+    "src/drv_hx711.c",
+    "src/drv_feeder.c",
+    "src/feed_scheduler.c",
+    "src/drv_light.c",
+    "src/drv_motor.c",
+    "src/drv_rgb_led.c",
+    "src/drv_mlx90614.c",
+    "src/drv_sensors.c",
+    "src/hrv_analyzer.c",
+    "src/health_monitor.c",
+    "src/iot.c",
+    "src/lcd.c",
+    "src/max30102.c",
+    "src/mpu6050.c",
+    "src/picture.c",
+    "src/smart_home.c",
+    "src/smart_home_event.c",
+    "src/su_03t.c",
+    "src/voice_intent.c",
+    "src/voice_adc.c",
+    "src/voice_feature.c",
+  ]
+
+  include_dirs = [
+    "//utils/native/lite/include",
+    "include",
+    "//kernel/liteos_m/components/shell/include",
+    "//base/iot_hardware/peripheral/interfaces/kits",
+    "//device/rockchip/rk2206/adapter/include",
+    "//device/rockchip/rk2206/sdk_liteos/board/include",
+    "//device/rockchip/hardware/lib/hal/inc",
+    "//device/rockchip/hardware/lib/CMSIS/Device/RK2206/Include/",
+    "//third_party/cJSON",
+    "//third_party/musl/porting/liteos_m/kernel/include",
+    "//third_party/paho_mqtt/MQTTPacket/src",
+    "//third_party/paho_mqtt/MQTTClient-C/src",
+  ]
+
+  deps = [ "//device/rockchip/hardware:hardware" ]
+}
