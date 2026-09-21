@@ -1,0 +1,18 @@
+{
+  "src": [
+    "pages/LandingPage",
+    "pages/LoginPage",
+    "pages/Index",
+    "pages/ComfortPage",
+    "pages/FeedingPage",
+    "pages/ProfilePage",
+    "pages/AdoptionPage",
+    "pages/EditProfilePage",
+    "pages/HistoryPage",
+    "pages/PetManagePage",
+    "pages/AdopterManagePage",
+    "pages/ResetPasswordPage",
+    "pages/VirtualPetPage",
+    "pages/DashboardPage"
+  ]
+}
