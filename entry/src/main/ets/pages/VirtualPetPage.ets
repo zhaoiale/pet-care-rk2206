@@ -835,7 +835,7 @@ export struct VirtualPetPage {
                   Image($rawfile('image/ic_emotion.svg')).width(14).height(14).fillColor(Theme.PRIMARY);
                   Text('AI 解读').fontSize(11).fontColor(Theme.PRIMARY)
                     .fontWeight(FontWeight.Medium).margin({ left: 4 });
-                  Text(' DeepSeek').fontSize(9).fontColor(Theme.PRIMARY).opacity(0.6).margin({ left: 4 });
+                  Text(' Kimi').fontSize(9).fontColor(Theme.PRIMARY).opacity(0.6).margin({ left: 4 });
                 }
                 .margin({ bottom: 6 });
                 Text(this.aiInterpretation)

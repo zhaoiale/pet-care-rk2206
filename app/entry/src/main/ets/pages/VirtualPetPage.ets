@@ -733,7 +733,7 @@ export struct VirtualPetPage {
                   Text('AI 解读')
                     .fontSize(11).fontColor('#6C47FF')
                     .fontWeight(FontWeight.Medium)
-                  Text(' DeepSeek')
+                  Text(' Kimi')
                     .fontSize(9).fontColor('#6C47FF')
                     .opacity(0.6)
                     .margin({ left: 4 })

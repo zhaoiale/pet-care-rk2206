@@ -1,18 +1,20 @@
 // MqttService.ets — MQTT 数据收发服务
-// 通过 TCP 连接 HiveMQ 公共 Broker
-// 订阅 petcare/device/data 接收硬件上报
-// 发布 petcare/device/command 下发指令
+// 【2026-10-08 改造】由 HiveMQ 公共 broker 改为华为云 IoTDA（一机一密 + $oc 系统主题）
+//   订阅：$oc/devices/{app_device}/sys/messages/down  —— 平台消息下发（App 设备）
+//   发布：$oc/devices/{app_device}/sys/messages/up    —— 消息上报（指令经平台转发给板子）
+//   板子数据（属性上报）由 IoTDA 控制台/规则引擎转发到本设备后，从 messages/down 接收。
 
 import { insertSensorRecord } from '../database/DatabaseService';
 import { SensorRecord, GpsPathPoint } from '../model/SensorRecord';
 import { mqttConnect, mqttSubscribe, mqttPublish, onMqttMessage, isMqttReady } from './SimpleMqttClient';
 import { checkAndNotifyAnxiety } from './NotificationService';
-import { analyzePetState, PetStateContext, getLastAiResult } from './DeepSeekService';
+import { analyzePetState, PetStateContext } from './DeepSeekService';
+import { IotdaConfig, buildIotdaAuth, IotdaAuth } from './IotdaConfig';
 
-const CLIENT_ID: string = 'petcare_app_' + Date.now().toString();
-const SUBSCRIBE_TOPIC: string = 'petcare/device/data';
-const VOICE_INTENT_TOPIC: string = 'petcare/voice/intent';
-const COMMAND_TOPIC: string = 'petcare/device/command';
+// IoTDA 平台消息下发主题（App 设备订阅）
+const SUBSCRIBE_TOPIC: string = IotdaConfig.TOPIC_MSG_DOWN;
+// IoTDA 上行消息主题（App 指令 -> 平台 -> 板子）
+const COMMAND_TOPIC: string = IotdaConfig.TOPIC_MSG_UP;
 
 interface MqttPropertyBag {
   illumination: string;
@@ -54,10 +56,6 @@ interface MqttPayload {
 interface PathDataPayload {
   cmd: string;
   points: GpsPathPoint[];
-}
-
-interface VoiceIntentPayload {
-  intent: string;
 }
 
 // 全局围栏 + 路径状态
@@ -190,57 +188,122 @@ async function parseAndStore(payload: string): Promise<void> {
   }
 }
 
+/**
+ * IoTDA 消息下发解包：平台下发的消息可能有多层包装，全部兼容：
+ *   1) {"content":"{业务JSON}"}       content 为字符串
+ *   2) {"content":{"services":..}}    content 为对象
+ *   3) {"message":{"cmd":..}}         message 为对象
+ *   4) {"message":"{业务JSON}"}       message 为字符串
+ *   5) 直发业务 JSON: {"services":..} / {"cmd":..}
+ * 返回业务层 JSON 字符串。
+ */
+function unwrapIotdaMessage(payload: string): string {
+  try {
+    const root: Record<string, Object> = JSON.parse(payload) as Record<string, Object>;
+    const content: Object | undefined = root['content'];
+    if (content !== undefined) {
+      if (typeof content === 'string') {
+        return content as string;
+      }
+      return JSON.stringify(content);
+    }
+    const message: Object | undefined = root['message'];
+    if (message !== undefined) {
+      if (typeof message === 'string') {
+        return message as string;
+      }
+      return JSON.stringify(message);
+    }
+    return payload; // 直发业务 JSON
+  } catch (e) {
+    return payload;
+  }
+}
+
+/** 触发 DeepSeek AI 分析（板子叫声意图到达时调用） */
+function triggerAiAnalysis(intent: string): void {
+  const ctx: PetStateContext = {
+    species: 'cat',  // 默认猫，后续可从设置获取
+    voiceIntent: intent,
+    voiceConfidence: 0.85,
+    heartRate: lastHeartRate,
+    spo2: lastSpo2,
+    activityLevel: lastActivity,
+    anxietyLevel: lastAnxiety,
+    healthScore: lastHealthScore,
+    emotion: lastEmotion,
+    lastFeedHours: 0,
+    timeOfDay: new Date().getHours().toString() + '点'
+  };
+  analyzePetState(ctx).then((result: string) => {
+    lastAiInterpretation = result;
+    const key = AppStorage.Get<number>('dataUpdateKey') ?? 0;
+    AppStorage.SetOrCreate('dataUpdateKey', key + 1);
+  });
+}
+
+/**
+ * 处理平台下发给 App 的消息：
+ *   - 业务 JSON 含 services[]（板子属性上报经平台转发）→ 入库 + 刷新 UI
+ *   - 业务 JSON 含 cmd=petVoice（板子叫声意图）→ 更新意图 + 触发 AI 分析
+ */
+function handleDownMessage(payload: string): void {
+  const business: string = unwrapIotdaMessage(payload);
+  console.info('[MQTT] Down message: ' + business);
+
+  // 1) services[] 属性上报格式（与板子 send_msg_to_mqtt 一致）
+  try {
+    const root: MqttPayload = JSON.parse(business) as MqttPayload;
+    if (root.services && root.services.length > 0) {
+      parseAndStore(business);
+      return;
+    }
+  } catch (e) {
+    // 不是 services 格式，继续尝试命令解析
+  }
+
+  // 2) 命令/意图格式
+  try {
+    const obj: Record<string, Object> = JSON.parse(business) as Record<string, Object>;
+    const cmd: Object | undefined = obj['cmd'];
+    if (cmd === 'petVoice') {
+      const intent: Object | undefined = obj['intent'];
+      const intentStr: string = (intent !== undefined && typeof intent === 'string') ? intent as string : business;
+      lastVoiceIntent = intentStr;
+      console.info('[MQTT] Voice intent received: ' + intentStr);
+      triggerAiAnalysis(intentStr);
+    }
+    // 其他 cmd（refresh/comfort/feed 等）为 App 下发指令的响应，App 端无需处理
+  } catch (e) {
+    // 解析失败的消息直接丢弃
+  }
+}
+
 export async function startMqttService(): Promise<void> {
   if (isMqttReady()) {
     console.info('[MQTT] Already connected, skipping');
     return;
   }
 
-  console.info('[MQTT] Connecting to HiveMQ via TCP...');
+  console.info('[MQTT] Connecting to Huawei IoTDA via TCP...');
 
+  // IoTDA 一机一密：订阅平台消息下发（App 设备）
   onMqttMessage((topic: string, payload: string) => {
-    console.info('[MQTT] Received topic=' + topic + ' len=' + payload.length.toString());
-    if (topic === VOICE_INTENT_TOPIC) {
-      try {
-        const data = JSON.parse(payload) as VoiceIntentPayload;
-        const intent = data.intent || payload;
-        lastVoiceIntent = intent;
-        console.info('[MQTT] Voice intent received: ' + intent);
-
-        // 触发 DeepSeek AI 分析
-        const ctx: PetStateContext = {
-          species: 'cat',  // 默认猫，后续可从设置获取
-          voiceIntent: intent,
-          voiceConfidence: 0.85,
-          heartRate: lastHeartRate,
-          spo2: lastSpo2,
-          activityLevel: lastActivity,
-          anxietyLevel: lastAnxiety,
-          healthScore: lastHealthScore,
-          emotion: lastEmotion,
-          lastFeedHours: 0,
-          timeOfDay: new Date().getHours().toString() + '点'
-        };
-        analyzePetState(ctx).then((result: string) => {
-          lastAiInterpretation = result;
-          const key = AppStorage.Get<number>('dataUpdateKey') ?? 0;
-          AppStorage.SetOrCreate('dataUpdateKey', key + 1);
-        });
-      } catch (_e) {
-        lastVoiceIntent = payload;
-      }
-      return;
+    if (topic === SUBSCRIBE_TOPIC) {
+      handleDownMessage(payload);
     }
-    parseAndStore(payload);
   });
 
-  const connected: boolean = await mqttConnect(CLIENT_ID);
+  // 动态计算一机一密认证参数（clientId/username/password 随当前小时有效）
+  const auth: IotdaAuth = await buildIotdaAuth();
+  console.info('[MQTT] IoTDA auth: device=' + auth.username + ' ts=' + auth.timestamp);
+
+  const connected: boolean = await mqttConnect(auth.clientId, auth.username, auth.password);
   if (connected) {
     await mqttSubscribe(SUBSCRIBE_TOPIC);
-    await mqttSubscribe(VOICE_INTENT_TOPIC);
-    console.info('[MQTT] Connected & subscribed to HiveMQ');
+    console.info('[MQTT] Connected & subscribed to Huawei IoTDA: ' + SUBSCRIBE_TOPIC);
   } else {
-    console.error('[MQTT] Connection failed — no data will be received');
+    console.error('[MQTT] IoTDA connection failed — check device_id/secret or platform status');
   }
 }
 

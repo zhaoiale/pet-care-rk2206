@@ -31,20 +31,28 @@
 #include "su_03t.h"
 #include "voice_intent.h"
 
-#define MQTT_DEVICES_PWD "public"
+#define MQTT_DEVICES_PWD "abc2e3e983736b2a7b8948b02435958ffdd2db03cff5e1bbe875233431f12239" /* HMAC-SHA256(2026100814, 设备密钥)，用 tools/gen_iotda_credential.py 生成 */
 
-// HiveMQ 公共 MQTT Broker
-#define HOST_ADDR "broker.hivemq.com"
+// 华为云 IoTDA 设备接入（华北-北京四，复用饮水项目实例）
+#define HOST_ADDR "5256547599.st1.iotda-device.cn-north-4.myhuaweicloud.com"
 
-#define DEVICE_ID "petcare_rk2206_001"
+#define DEVICE_ID "6aa9198b7f2e6c302f999974_rk2206_water01"
+/* IoTDA 一机一密 ClientId = 设备ID_0_0_YYYYMMDDHH（时间戳小时级有效，
+ * 过期后需重新生成，见 tools/gen_iotda_credential.py） */
+#define CLIENT_ID  "6aa9198b7f2e6c302f999974_rk2206_water01_0_0_2026100814"
 
-// 公共 topic，App 端订阅同一个 topic 即可接收数据
-#define PUBLISH_TOPIC "petcare/device/data"
-#define SUBCRIB_TOPIC "petcare/device/command"
-#define RESPONSE_TOPIC "petcare/device/response"
-#define VOICE_FEAT_TOPIC "petcare/voice/features"   /* ESP32感知节点 -> 主控 */
-#define VOICE_INTENT_TOPIC "petcare/voice/intent"   /* 主控分类结果 -> App */
-#define WEARABLE_TOPIC     "pet/wearable/data"      /* ESP32穿戴设备 -> 主控 */
+// $oc 系统主题（带设备归属校验）
+#define PUBLISH_TOPIC "$oc/devices/" DEVICE_ID "/sys/messages/up"        /* 消息上报（不校验物模型，零配置） */
+#define PROP_REPORT_TOPIC "$oc/devices/" DEVICE_ID "/sys/properties/report" /* 属性上报（需物模型匹配，可选） */
+#define SUBCRIB_TOPIC "$oc/devices/" DEVICE_ID "/sys/messages/down"      /* 平台消息下发（指令） */
+#define RESPONSE_TOPIC "$oc/devices/" DEVICE_ID "/sys/commands/response/request_id={request_id}"
+#define VOICE_INTENT_TOPIC "$oc/devices/" DEVICE_ID "/sys/messages/up"   /* 叫声意图 -> 平台（消息上报） */
+/* ESP32 感知节点在 IoTDA 下不能直接向主控发 MQTT（$oc 主题归属校验），
+ * 若需接入请让 ESP32 注册独立 IoTDA 设备并经平台转发，或改走主控本地 UART。
+ * 原 HiveMQ 主题已失效：
+#define VOICE_FEAT_TOPIC "petcare/voice/features"
+#define WEARABLE_TOPIC   "pet/wearable/data"
+*/
 
 #define MAX_BUFFER_LENGTH 1024
 #define MAX_STRING_LENGTH 64
@@ -56,7 +64,6 @@ static unsigned char readBuf[MAX_BUFFER_LENGTH];
 Network network;
 MQTTClient client;
 
-static char mqtt_devid[64]=DEVICE_ID;
 static char mqtt_pwd[64]=MQTT_DEVICES_PWD;
 static char mqtt_username[64]=DEVICE_ID;
 static char mqtt_hostaddr[64]=HOST_ADDR;
@@ -83,7 +90,7 @@ extern bool auto_state;
 
 /***************************************************************
 * 函数名称: send_msg_to_mqtt
-* 说    明: 发送信息到 MQTT (HiveMQ 公共 Broker)
+* 说    明: 发送信息到 MQTT (华为云 IoTDA 消息上报)
 * 参    数: e_iot_data *iot_data：数据
 * 返 回 值: 无
 ***************************************************************/
@@ -303,8 +310,48 @@ void mqtt_message_arrived(MessageData *data) {
   root =
       cJSON_ParseWithLength(data->message->payload, data->message->payloadlen);
   if (root != NULL) {
+    /* ---- IoTDA 消息下发多层包装解包（兼容控制台/规则转发多种格式）----
+     *   1) {"content":"{业务JSON}"}       content 为字符串
+     *   2) {"content":{"cmd":..}}         content 为对象
+     *   3) {"message":{"cmd":..}}         message 为对象
+     *   4) {"message":"{业务JSON}"}       message 为字符串
+     *   5) 直发业务 JSON: {"cmd":..}
+     * 统一解包到 inner 后按原契约解析 cmd。 */
+    cJSON *inner = root;
+    cJSON *parsed = NULL;
+    cJSON *content = cJSON_GetObjectItem(root, "content");
+    if (content != NULL) {
+      if (cJSON_IsString(content)) {
+        parsed = cJSON_Parse(content->valuestring);
+        if (parsed != NULL) {
+          inner = parsed;
+        }
+      } else if (cJSON_IsObject(content)) {
+        inner = content;   /* root 子对象，随 root 释放 */
+      }
+    }
+    cJSON *message = cJSON_GetObjectItem(inner, "message");
+    if (message != NULL) {
+      if (cJSON_IsString(message)) {
+        cJSON *p2 = cJSON_Parse(message->valuestring);
+        if (p2 != NULL) {
+          if (parsed != NULL) {
+            cJSON_Delete(parsed);
+          }
+          parsed = p2;
+          inner = p2;
+        }
+      } else if (cJSON_IsObject(message)) {
+        if (parsed != NULL) {
+          cJSON_Delete(parsed);
+          parsed = NULL;
+        }
+        inner = message;   /* root 子对象，随 root 释放 */
+      }
+    }
+
     // 新格式: {"cmd":"refresh"}
-    cmd_name = cJSON_GetObjectItem(root, "cmd");
+    cmd_name = cJSON_GetObjectItem(inner, "cmd");
     if (cmd_name != NULL) {
       cmd_name_str = cJSON_GetStringValue(cmd_name);
       if (!strcmp(cmd_name_str, "refresh")) {
@@ -316,8 +363,8 @@ void mqtt_message_arrived(MessageData *data) {
         printf("Refresh command received, triggering immediate publish\n");
       } else if (!strcmp(cmd_name_str, "comfort")) {
         // 远程一键安抚: {"cmd":"comfort","type":1|2,"audioSubType":1|2|3}
-        cJSON *type_obj = cJSON_GetObjectItem(root, "type");
-        cJSON *audio_obj = cJSON_GetObjectItem(root, "audioSubType");
+        cJSON *type_obj = cJSON_GetObjectItem(inner, "type");
+        cJSON *audio_obj = cJSON_GetObjectItem(inner, "audioSubType");
         g_comfort_mode = (type_obj && type_obj->type == cJSON_Number)
                          ? type_obj->valueint : COMFORT_TYPE_LIGHT;
         if (audio_obj && audio_obj->type == cJSON_Number) {
@@ -331,7 +378,7 @@ void mqtt_message_arrived(MessageData *data) {
                g_comfort_mode, g_audio_sub_type);
       } else if (!strcmp(cmd_name_str, "feed")) {
         // 远程投喂
-        cJSON *amount_obj = cJSON_GetObjectItem(root, "amount");
+        cJSON *amount_obj = cJSON_GetObjectItem(inner, "amount");
         g_feed_amount = (amount_obj && amount_obj->type == cJSON_Number)
                         ? amount_obj->valueint : 50;
         event_info_t event={0};
@@ -352,22 +399,22 @@ void mqtt_message_arrived(MessageData *data) {
         smart_home_event_send(&event);
         printf("GetPath command received\n");
       } else if (!strcmp(cmd_name_str, "scheduleSync")) {
-        char *raw = cJSON_PrintUnformatted(root);
+        char *raw = cJSON_PrintUnformatted(inner);
         if (raw) {
             int n = feed_scheduler_parse_json(raw);
             printf("ScheduleSync: %d entries parsed\n", n);
             cJSON_free(raw);
         }
       } else if (!strcmp(cmd_name_str, "timeSync")) {
-        cJSON *ts_obj = cJSON_GetObjectItem(root, "ts");
+        cJSON *ts_obj = cJSON_GetObjectItem(inner, "ts");
         if (ts_obj && ts_obj->type == cJSON_Number) {
             feed_scheduler_sync_time((uint32_t)ts_obj->valueint);
             printf("TimeSync: ts=%u\n", (uint32_t)ts_obj->valueint);
         }
       } else if (!strcmp(cmd_name_str, "playSound")) {
         /* App互动: {"cmd":"playSound","intent":"happy","species":"dog"} */
-        cJSON *int_obj = cJSON_GetObjectItem(root, "intent");
-        cJSON *sp_obj  = cJSON_GetObjectItem(root, "species");
+        cJSON *int_obj = cJSON_GetObjectItem(inner, "intent");
+        cJSON *sp_obj  = cJSON_GetObjectItem(inner, "species");
         if (int_obj && int_obj->valuestring) {
             strncpy(g_play_sound_intent, int_obj->valuestring,
                     sizeof(g_play_sound_intent) - 1);
@@ -391,16 +438,21 @@ void mqtt_message_arrived(MessageData *data) {
     }
 
     // 旧格式: {"command_name":"light_control", ...}
-    cmd_name = cJSON_GetObjectItem(root, "command_name");
+    cmd_name = cJSON_GetObjectItem(inner, "command_name");
     if (cmd_name != NULL) {
       cmd_name_str = cJSON_GetStringValue(cmd_name);
       if (!strcmp(cmd_name_str, "light_control")) {
-        set_light_state(root);
+        set_light_state(inner);
       } else if (!strcmp(cmd_name_str, "motor_control")) {
-        set_motor_state(root);
+        set_motor_state(inner);
       } else if (!strcmp(cmd_name_str, "auto_control")) {
-        set_auto_state(root);
+        set_auto_state(inner);
       }
+    }
+
+    /* 释放解包产生的独立 cJSON（parsed/p2），inner 若是 root 子对象随 root 释放 */
+    if (parsed != NULL) {
+      cJSON_Delete(parsed);
     }
   }
 
@@ -428,14 +480,14 @@ int wait_message() {
 
 /***************************************************************
 * 函数名称: mqtt_init
-* 说    明: mqtt初始化 (HiveMQ 公共 Broker)
+* 说    明: mqtt初始化 (华为云 IoTDA 一机一密)
 * 参    数: 无
 * 返 回 值: 无
 ***************************************************************/
 void mqtt_init() {
   int rc;
 
-  printf("Starting MQTT (HiveMQ public broker)...\n");
+  printf("Starting MQTT (Huawei IoTDA)...\n");
 
   /* Close previous connection to prevent sock/mem leak */
   NetworkDisconnect(&network);
@@ -452,8 +504,10 @@ begin:
   MQTTClientInit(&client, &network, 2000, sendBuf, sizeof(sendBuf), readBuf,
                  sizeof(readBuf));
 
+  /* IoTDA 一机一密：clientId = 设备ID_0_0_时间戳，username = 设备ID，
+   * password = HMAC-SHA256(时间戳, 设备密钥) */
   MQTTString clientId = MQTTString_initializer;
-  clientId.cstring = mqtt_devid;
+  clientId.cstring = CLIENT_ID;
 
   MQTTString userName = MQTTString_initializer;
   userName.cstring = mqtt_username;
@@ -470,7 +524,7 @@ begin:
   data.keepAliveInterval = 60;
   data.cleansession = 1;
 
-  printf("MQTTConnect (HiveMQ) ...\n");
+  printf("MQTTConnect (IoTDA) ...\n");
   rc = MQTTConnect(&client, &data);
   if (rc != 0) {
     printf("MQTTConnect: %d\n", rc);
@@ -488,22 +542,12 @@ begin:
     goto begin;
   }
 
-  /* 订阅 ESP32 叫声感知节点的特征上报 */
-  rc = MQTTSubscribe(&client, VOICE_FEAT_TOPIC, 0, mqtt_voice_feat_arrived);
-  if (rc != 0) {
-    printf("MQTTSubscribe(voice): %d\n", rc);
-    /* 非致命: 叫声功能降级, 主链路继续 */
-  }
-
-    /* 订阅 ESP32 穿戴设备数据 */
-    rc = MQTTSubscribe(&client, WEARABLE_TOPIC, 0, mqtt_wearable_arrived);
-    if (rc != 0) {
-        printf("MQTTSubscribe(wearable): %d\n", rc);
-        /* 非致命: 穿戴功能降级, 回退本地传感器 */
-    }
+  /* ESP32 感知节点（voice/wearable）在 IoTDA 下无法通过 MQTT 直发主控
+   * （$oc 主题归属校验），原 HiveMQ 订阅已移除。
+   * 需要接入时：ESP32 注册独立 IoTDA 设备 -> 平台规则转发 -> 主控下行，或改主控本地 UART。 */
 
   mqttConnectFlag = 1;
-  printf("MQTT connected to HiveMQ!\n");
+  printf("MQTT connected to Huawei IoTDA!\n");
 }
 
 /***************************************************************

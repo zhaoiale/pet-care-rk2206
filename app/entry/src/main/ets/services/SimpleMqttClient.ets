@@ -1,10 +1,12 @@
 // SimpleMqttClient.ets — MQTT-over-TCP 客户端
 // 使用 @ohos.net.socket 直连 MQTT broker TCP 端口 1883
+// 【2026-10-08 改造】broker 由 HiveMQ 公共改为华为云 IoTDA（一机一密认证）
 import socket from '@ohos.net.socket';
 import connection from '@ohos.net.connection';
+import { IotdaConfig } from './IotdaConfig';
 
-const BROKER_HOST: string = 'broker.hivemq.com';
-const BROKER_PORT: number = 1883;
+const BROKER_HOST: string = IotdaConfig.HOST;
+const BROKER_PORT: number = IotdaConfig.PORT;
 
 interface TcpMessageEvent {
   message: ArrayBuffer;
@@ -14,6 +16,8 @@ interface TcpMessageEvent {
 let tcp: socket.TCPSocket | null = null;
 let onMessageCallback: ((topic: string, payload: string) => void) | null = null;
 let savedClientId: string = '';
+let savedUsername: string = '';
+let savedPassword: string = '';
 let subscribedTopics: string[] = [];
 let reconnectTimer: number = -1;
 let reconnectAttempts: number = 0;
@@ -218,9 +222,15 @@ export function isMqttReady(): boolean {
 
 // ---- 公开接口 ----
 
-export async function mqttConnect(clientId: string): Promise<boolean> {
+export async function mqttConnect(clientId: string, username?: string, password?: string): Promise<boolean> {
   try {
     savedClientId = clientId;
+    if (username !== undefined && username !== null) {
+      savedUsername = username;
+    }
+    if (password !== undefined && password !== null) {
+      savedPassword = password;
+    }
     tcp = socket.constructTCPSocketInstance();
 
     // 注册消息接收回调
@@ -319,8 +329,8 @@ export async function mqttConnect(clientId: string): Promise<boolean> {
     await tcp.connect(connectOpt);
     console.info('[MQTT-TCP] TCP connected');
 
-    // 发送 MQTT CONNECT
-    const connectPkt: ArrayBuffer = buildConnectPacket(clientId);
+    // 发送 MQTT CONNECT（IoTDA 一机一密：clientId + username + password）
+    const connectPkt: ArrayBuffer = buildConnectPacket(clientId, username, password);
     const dbg: Uint8Array = new Uint8Array(connectPkt);
     let hex: string = '';
     for (let j: number = 0; j < Math.min(20, dbg.length); j++) {
@@ -420,7 +430,9 @@ function scheduleReconnect(): void {
 
 async function doReconnect(): Promise<void> {
   try {
-    const ok: boolean = await mqttConnect(savedClientId);
+    // 重连沿用保存的 IoTDA 一机一密认证参数（注意：密码随小时有效，
+    // 若断线跨越整点，重新调用 mqttConnect 前请由调用方刷新 auth）
+    const ok: boolean = await mqttConnect(savedClientId, savedUsername, savedPassword);
     if (!ok) {
       scheduleReconnect();
       return;
