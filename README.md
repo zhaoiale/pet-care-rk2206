@@ -16,7 +16,7 @@
 | 主动安抚 | 24h 分桶自适应基线学习，RGB 灯光 / 蜂鸣 / 语音 分级安抚 |
 | 定量投喂 | HX711 称重闭环克数控制 + 每日定时投喂计划 |
 | 电子围栏 | GPS 轨迹记录，100m 半径越界检测，离线轨迹 Flash 存储 |
-| 远程控制 | HiveMQ MQTT 通信，App 远程投喂 / 安抚 / 查看轨迹 |
+| 远程控制 | 华为云 IoTDA（MQTT 一机一密动态认证），App 远程投喂 / 安抚 / 查看轨迹 |
 | 健康监测 | MAX30102 心率血氧、MLX90614 红外体温、MPU6050 活动量 |
 | 语音交互 | SU-03T 中文离线语音识别 |
 | App 全栈 | HarmonyOS ArkTS，登录/看板/投喂/历史/领养等 16+ 页面 |
@@ -69,10 +69,10 @@ python3 build/lite/hb/__main__.py build -f
 HarmonyOS ArkUI（ArkTS）应用，DevEco Studio 直接打开 `app/` 即可编译打包 HAP。
 
 - **页面**：登录/注册、宠物看板、投喂控制、历史曲线、舒适安抚、虚拟宠物、领养管理等 16+ 页面
-- **服务**：MQTT 通信（`MqttService`）、本地通知、DeepSeek 智能问答
+- **服务**：MQTT 通信（`MqttService` + 华为云 IoTDA 一机一密）、本地通知、Kimi 大模型智能问答
 - **数据**：RelationalStore 本地库（宠物档案 / 投喂计划 / 传感器记录）
 
-MQTT 协议：`broker.hivemq.com:1883`，发布 `petcare/device/data`，订阅 `petcare/device/command`。
+MQTT 协议：华为云 IoTDA（华北-北京四，`5256547599.st1.iotda-device.cn-north-4.myhuaweicloud.com:1883`），一机一密认证（HMAC-SHA256，App 端运行期动态计算）；消息上报 `$oc/devices/{设备}/sys/messages/up`、指令下发订阅 `$oc/devices/{设备}/sys/messages/down`。
 
 > 详细功能、页面说明与命令协议见 `app/README.md`。
 
