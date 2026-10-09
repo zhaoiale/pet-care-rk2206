@@ -31,7 +31,7 @@
 #include "su_03t.h"
 #include "voice_intent.h"
 
-#define MQTT_DEVICES_PWD "abc2e3e983736b2a7b8948b02435958ffdd2db03cff5e1bbe875233431f12239" /* HMAC-SHA256(2026100814, 设备密钥)，用 tools/gen_iotda_credential.py 生成 */
+#define MQTT_DEVICES_PWD "1d01749b6270c991c2f37694af35ae5d0e9aaec8a0f71a7a7e3c1f77f544e36c" /* HMAC-SHA256(2026100910, 设备密钥)，用 tools/gen_iotda_credential.py 生成 */
 
 // 华为云 IoTDA 设备接入（华北-北京四，复用饮水项目实例）
 #define HOST_ADDR "5256547599.st1.iotda-device.cn-north-4.myhuaweicloud.com"
@@ -39,7 +39,7 @@
 #define DEVICE_ID "6aa9198b7f2e6c302f999974_rk2206_water01"
 /* IoTDA 一机一密 ClientId = 设备ID_0_0_YYYYMMDDHH（时间戳小时级有效，
  * 过期后需重新生成，见 tools/gen_iotda_credential.py） */
-#define CLIENT_ID  "6aa9198b7f2e6c302f999974_rk2206_water01_0_0_2026100814"
+#define CLIENT_ID  "6aa9198b7f2e6c302f999974_rk2206_water01_0_0_2026100910"
 
 // $oc 系统主题（带设备归属校验）
 #define PUBLISH_TOPIC "$oc/devices/" DEVICE_ID "/sys/messages/up"        /* 消息上报（不校验物模型，零配置） */

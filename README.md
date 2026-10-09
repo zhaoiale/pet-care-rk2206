@@ -19,7 +19,7 @@
 | 远程控制 | 华为云 IoTDA（MQTT 一机一密动态认证），App 远程投喂 / 安抚 / 查看轨迹 |
 | 健康监测 | MAX30102 心率血氧、MLX90614 红外体温、MPU6050 活动量 |
 | 语音交互 | SU-03T 中文离线语音识别 |
-| App 全栈 | HarmonyOS ArkTS，登录/看板/投喂/历史/领养等 16+ 页面 |
+| App 全栈 | HarmonyOS ArkTS，登录/看板/投喂/历史/领养等 17 页面 |
 
 ---
 
@@ -28,20 +28,22 @@
 ```
 pet-care-rk2206/
 ├── hardware_src/            # 南向：RK2206 固件源码（OpenHarmony LiteOS-M）
-│   ├── BUILD.gn             # GN 构建配置（static_library: pet_care_example）
+│   ├── BUILD.gn             # GN 构建配置（static_library: pet_care_example，编译 32 个源文件）
 │   ├── iot_pet_care_example.c  # 主程序：任务创建 / 主循环 / MQTT 打包
-│   ├── include/             # 模块头文件（33 个）
-│   ├── src/                 # 模块源码（33 个）：驱动 / 算法 / 业务
+│   ├── *.h                  # 模块头文件（32 个，与 src 平级）
+│   ├── src/                 # 模块源码（33 个 .c：驱动 / 算法 / 业务；含 SU-03T 变体）
 │   └── README.md            # 固件说明（依赖 SDK 集成）
-└── app/                     # 北向：HarmonyOS App 源码（ArkTS/ArkUI）
-    ├── AppScope/            # 应用级配置
-    ├── entry/               # entry 模块（pages / services / database / utils / model）
-    ├── hvigor/              # 构建配置
-    ├── build-profile.json5  # 工程构建配置
-    ├── oh-package.json5     # 依赖声明
-    ├── *.py                 # 辅助脚本（焦虑模拟 / 演示数据）
-    ├── *.md                 # 项目文档（README / demo_script / DEVELOPMENT_LOG）
-    └── README.md            # 详细项目文档（硬件设计 + 固件架构 + App + MQTT 协议）
+├── entry/                   # 北向 App 工程一（HarmonyOS ArkTS）
+├── app/                     # 北向 App 工程二（与 entry/ 双工程同步维护）
+│   ├── AppScope/            # 应用级配置
+│   ├── entry/               # entry 模块（pages / services / database / utils / model）
+│   ├── hvigor/              # 构建配置
+│   ├── build-profile.json5  # 工程构建配置
+│   ├── oh-package.json5     # 依赖声明
+│   ├── *.py                 # 辅助脚本（焦虑模拟 / 演示数据）
+│   ├── *.md                 # 项目文档（README / demo_script / DEVELOPMENT_LOG）
+│   └── README.md            # 详细项目文档（硬件设计 + 固件架构 + App + MQTT 协议）
+└── tools/                   # 工具链（IoTDA 凭证生成 / 连接自测）
 ```
 
 ---
@@ -68,7 +70,7 @@ python3 build/lite/hb/__main__.py build -f
 
 HarmonyOS ArkUI（ArkTS）应用，DevEco Studio 直接打开 `app/` 即可编译打包 HAP。
 
-- **页面**：登录/注册、宠物看板、投喂控制、历史曲线、舒适安抚、虚拟宠物、领养管理等 16+ 页面
+- **页面**：登录/注册、宠物看板、投喂控制、历史曲线、舒适安抚、虚拟宠物、领养管理等 17 页面
 - **服务**：MQTT 通信（`MqttService` + 华为云 IoTDA 一机一密）、本地通知、Kimi 大模型智能问答
 - **数据**：RelationalStore 本地库（宠物档案 / 投喂计划 / 传感器记录）
 
